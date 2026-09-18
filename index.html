@@ -1,1 +1,462 @@
-# Strel1
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <title>Cyber Shooter</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+    }
+
+    body {
+      background: #060913;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      height: 100vh;
+      overflow: hidden;
+      padding: 10px;
+    }
+
+    .top-bar {
+      display: flex;
+      width: 100%;
+      max-width: 360px;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 14px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(0, 240, 255, 0.2);
+      border-radius: 14px;
+    }
+
+    .lives {
+      color: #ff3366;
+      font-size: 18px;
+      letter-spacing: 4px;
+    }
+
+    .powerup-indicators {
+      display: flex;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .badge {
+      padding: 3px 6px;
+      border-radius: 6px;
+      display: none;
+    }
+
+    .badge-shield {
+      background: rgba(0, 240, 255, 0.2);
+      border: 1px solid #00f0ff;
+      color: #00f0ff;
+    }
+
+    .badge-double {
+      background: rgba(189, 0, 255, 0.2);
+      border: 1px solid #bd00ff;
+      color: #bd00ff;
+    }
+
+    .score-box {
+      text-align: right;
+    }
+
+    .score-title {
+      font-size: 9px;
+      color: #7b88a8;
+      text-transform: uppercase;
+    }
+
+    .score-val {
+      font-size: 18px;
+      font-weight: 800;
+      color: #00f0ff;
+    }
+
+    canvas {
+      background: #0b0f19;
+      border: 2px solid rgba(0, 240, 255, 0.25);
+      border-radius: 16px;
+      display: block;
+    }
+
+    .controls {
+      display: flex;
+      width: 100%;
+      max-width: 360px;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 6px;
+    }
+
+    .move-group {
+      display: flex;
+      gap: 10px;
+    }
+
+    .btn {
+      background: #151c2c;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: #e6edf3;
+      border-radius: 18px;
+      font-size: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      outline: none;
+      height: 60px;
+      width: 70px;
+    }
+
+    .btn:active {
+      transform: scale(0.92);
+      background: #00f0ff;
+      color: #060913;
+    }
+
+    .btn-fire {
+      width: 105px;
+      background: rgba(255, 51, 102, 0.15);
+      border-color: #ff3366;
+      color: #ff3366;
+      font-size: 16px;
+      font-weight: 800;
+    }
+
+    .btn-fire:active {
+      background: #ff3366;
+      color: #060913;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="top-bar">
+    <div class="lives" id="livesEl">♥♥♥</div>
+    <div class="powerup-indicators">
+      <div class="badge badge-shield" id="shieldBadge">ЩИТ</div>
+      <div class="badge badge-double" id="doubleBadge">2X</div>
+    </div>
+    <div class="score-box">
+      <div class="score-title">Очки</div>
+      <div class="score-val" id="scoreEl">0</div>
+    </div>
+  </div>
+
+  <canvas id="gameCanvas" width="330" height="400"></canvas>
+
+  <div class="controls">
+    <div class="move-group">
+      <button class="btn" id="btn-left">◀</button>
+      <button class="btn" id="btn-right">▶</button>
+    </div>
+    <button class="btn btn-fire" id="btn-fire">FIRE</button>
+  </div>
+
+  <script>
+    const tg = window.Telegram?.WebApp;
+    if (tg) { tg.ready(); tg.expand(); }
+
+    function haptic(type = 'light') {
+      if (tg?.HapticFeedback) {
+        if (type === 'error') tg.HapticFeedback.notificationOccurred('error');
+        else if (type === 'success') tg.HapticFeedback.notificationOccurred('success');
+        else tg.HapticFeedback.impactOccurred(type);
+      }
+    }
+
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const scoreEl = document.getElementById('scoreEl');
+    const livesEl = document.getElementById('livesEl');
+    const shieldBadge = document.getElementById('shieldBadge');
+    const doubleBadge = document.getElementById('doubleBadge');
+
+    let score = 0;
+    let lives = 3;
+    let gameOver = false;
+
+    const player = {
+      x: canvas.width / 2 - 16,
+      y: canvas.height - 45,
+      w: 32,
+      h: 24,
+      speed: 5,
+      hasShield: false,
+      doubleUntil: 0
+    };
+
+    let moveLeft = false;
+    let moveRight = false;
+    let isFiring = false;
+    let lastFire = 0;
+
+    let bullets = [];
+    let enemies = [];
+    let powerups = [];
+    let particles = [];
+    let stars = [];
+
+    for (let i = 0; i < 40; i++) {
+      stars.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        size: Math.random() * 1.5 + 0.5,
+        speed: Math.random() * 1.5 + 0.5
+      });
+    }
+
+    function spawnEnemy() {
+      if (gameOver) return;
+      enemies.push({
+        x: Math.random() * (canvas.width - 26),
+        y: -25,
+        w: 24,
+        h: 20,
+        speed: Math.random() * 1.5 + 1.5
+      });
+    }
+    setInterval(spawnEnemy, 950);
+
+    function createExplosion(x, y, color) {
+      for (let i = 0; i < 10; i++) {
+        particles.push({
+          x, y,
+          vx: (Math.random() - 0.5) * 5,
+          vy: (Math.random() - 0.5) * 5,
+          life: 1,
+          color
+        });
+      }
+    }
+
+    function trySpawnPowerup(x, y) {
+      if (Math.random() < 0.3) {
+        powerups.push({
+          x, y,
+          speed: 1.8,
+          type: Math.random() < 0.5 ? 'shield' : 'double'
+        });
+      }
+    }
+
+    function fireBullet() {
+      const now = Date.now();
+      if (now - lastFire > 190) {
+        const isDouble = now < player.doubleUntil;
+        if (isDouble) {
+          bullets.push({ x: player.x + 2, y: player.y - 4, w: 4, h: 10, speed: 8, color: '#bd00ff' });
+          bullets.push({ x: player.x + player.w - 6, y: player.y - 4, w: 4, h: 10, speed: 8, color: '#bd00ff' });
+        } else {
+          bullets.push({ x: player.x + player.w / 2 - 2, y: player.y - 6, w: 4, h: 10, speed: 8, color: '#00f0ff' });
+        }
+        haptic('light');
+        lastFire = now;
+      }
+    }
+
+    function resetGame() {
+      score = 0;
+      lives = 3;
+      gameOver = false;
+      player.x = canvas.width / 2 - 16;
+      player.hasShield = false;
+      player.doubleUntil = 0;
+      bullets = [];
+      enemies = [];
+      powerups = [];
+      particles = [];
+      scoreEl.textContent = '0';
+      livesEl.textContent = '♥♥♥';
+    }
+
+    function update() {
+      if (gameOver) return;
+
+      const now = Date.now();
+      shieldBadge.style.display = player.hasShield ? 'block' : 'none';
+      doubleBadge.style.display = now < player.doubleUntil ? 'block' : 'none';
+
+      if (moveLeft && player.x > 4) player.x -= player.speed;
+      if (moveRight && player.x < canvas.width - player.w - 4) player.x += player.speed;
+      if (isFiring) fireBullet();
+
+      stars.forEach(s => {
+        s.y += s.speed;
+        if (s.y > canvas.height) { s.y = 0; s.x = Math.random() * canvas.width; }
+      });
+
+      for (let i = bullets.length - 1; i >= 0; i--) {
+        bullets[i].y -= bullets[i].speed;
+        if (bullets[i].y < -20) bullets.splice(i, 1);
+      }
+
+      for (let i = powerups.length - 1; i >= 0; i--) {
+        const p = powerups[i];
+        p.y += p.speed;
+        if (p.x > player.x - 10 && p.x < player.x + player.w + 10 &&
+            p.y > player.y - 10 && p.y < player.y + player.h + 10) {
+          if (p.type === 'shield') player.hasShield = true;
+          if (p.type === 'double') player.doubleUntil = now + 10000;
+          haptic('success');
+          createExplosion(p.x, p.y, p.type === 'shield' ? '#00f0ff' : '#bd00ff');
+          powerups.splice(i, 1);
+          continue;
+        }
+        if (p.y > canvas.height + 20) powerups.splice(i, 1);
+      }
+
+      for (let i = enemies.length - 1; i >= 0; i--) {
+        const e = enemies[i];
+        e.y += e.speed;
+
+        for (let j = bullets.length - 1; j >= 0; j--) {
+          const b = bullets[j];
+          if (b.x < e.x + e.w && b.x + b.w > e.x && b.y < e.y + e.h && b.y + b.h > e.y) {
+            createExplosion(e.x + e.w / 2, e.y + e.h / 2, '#ffaa00');
+            haptic('medium');
+            trySpawnPowerup(e.x + e.w / 2, e.y + e.h / 2);
+            enemies.splice(i, 1);
+            bullets.splice(j, 1);
+            score += 20;
+            scoreEl.textContent = score;
+            break;
+          }
+        }
+
+        if (e && player.x < e.x + e.w && player.x + player.w > e.x && player.y < e.y + e.h && player.y + player.h > e.y) {
+          enemies.splice(i, 1);
+          if (player.hasShield) {
+            player.hasShield = false;
+            createExplosion(player.x + player.w / 2, player.y + player.h / 2, '#00f0ff');
+            haptic('medium');
+          } else {
+            createExplosion(player.x + player.w / 2, player.y + player.h / 2, '#ff3366');
+            haptic('error');
+            lives--;
+            livesEl.textContent = '♥'.repeat(Math.max(0, lives));
+            if (lives <= 0) {
+              gameOver = true;
+              setTimeout(() => { alert('Игра окончена! Счет: ' + score); resetGame(); }, 100);
+            }
+          }
+          continue;
+        }
+
+        if (e && e.y > canvas.height + 20) enemies.splice(i, 1);
+      }
+
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= 0.04;
+        if (p.life <= 0) particles.splice(i, 1);
+      }
+    }
+
+    function draw() {
+      ctx.fillStyle = '#080c16';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      stars.forEach(s => {
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      powerups.forEach(p => {
+        const col = p.type === 'shield' ? '#00f0ff' : '#bd00ff';
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 9, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = col;
+        ctx.font = 'bold 9px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(p.type === 'shield' ? 'S' : '2X', p.x, p.y);
+      });
+
+      // Корабль
+      ctx.fillStyle = '#00f0ff';
+      ctx.beginPath();
+      ctx.moveTo(player.x + player.w / 2, player.y);
+      ctx.lineTo(player.x + player.w, player.y + player.h);
+      ctx.lineTo(player.x + player.w / 2, player.y + player.h - 6);
+      ctx.lineTo(player.x, player.y + player.h);
+      ctx.closePath();
+      ctx.fill();
+
+      if (player.hasShield) {
+        ctx.strokeStyle = '#00f0ff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(player.x + player.w / 2, player.y + player.h / 2, 22, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      // Пули
+      bullets.forEach(b => {
+        ctx.fillStyle = b.color;
+        ctx.fillRect(b.x, b.y, b.w, b.h);
+      });
+
+      // Враги
+      ctx.fillStyle = '#ff3366';
+      enemies.forEach(e => {
+        ctx.beginPath();
+        ctx.moveTo(e.x + e.w / 2, e.y + e.h);
+        ctx.lineTo(e.x + e.w, e.y);
+        ctx.lineTo(e.x, e.y);
+        ctx.closePath();
+        ctx.fill();
+      });
+
+      // Частицы
+      particles.forEach(p => {
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x, p.y, 2.5, 2.5);
+      });
+    }
+
+    function loop() {
+      update();
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    function bind(btn, start, end) {
+      btn.addEventListener('touchstart', (e) => { e.preventDefault(); start(); });
+      btn.addEventListener('touchend', (e) => { e.preventDefault(); end(); });
+      btn.addEventListener('mousedown', start);
+      btn.addEventListener('mouseup', end);
+    }
+
+    bind(document.getElementById('btn-left'), () => moveLeft = true, () => moveLeft = false);
+    bind(document.getElementById('btn-right'), () => moveRight = true, () => moveRight = false);
+    bind(document.getElementById('btn-fire'), () => { isFiring = true; fireBullet(); }, () => isFiring = false);
+
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
+
